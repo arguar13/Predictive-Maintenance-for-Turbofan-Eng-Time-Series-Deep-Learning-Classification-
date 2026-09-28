@@ -21,3 +21,6 @@ export.py
 Thumbs.db
 .vscode/
 .idea/
+
+# Blog drafts and images (not part of the project)
+blog/

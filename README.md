@@ -41,11 +41,11 @@ Instead of predicting the exact Remaining Useful Life (RUL), the problem is tran
 
 Engine health states are defined as follows:
 
-| Class    | Remaining Useful Life |
-| -------- | --------------------- |
-| Healthy  | > 60 cycles           |
-| Warning  | 30–60 cycles          |
-| Critical | < 30 cycles           |
+| Class    | Remaining Useful Life      |
+| -------- | -------------------------- |
+| Healthy  | RUL > 60 cycles            |
+| Alert    | 30 < RUL ≤ 60 cycles       |
+| Critical | RUL ≤ 30 cycles            |
 
 This formulation provides more actionable outputs for maintenance planning and industrial decision-making.
 
@@ -55,9 +55,9 @@ This formulation provides more actionable outputs for maintenance planning and i
 
 The project includes extensive feature engineering techniques designed to enhance degradation pattern detection.
 
- -  Dynamic Features
- -  Static Features
- -  Data Preparation
+* **Dynamic features:** causal rolling mean and rolling standard deviation (window = 5 cycles) of every sensor, computed per engine.
+* **Static features:** engine baseline signature (mean of each sensor over the first 5 cycles) and an embedding of the sub-dataset (FD001–FD004, i.e. operating conditions / fault modes).
+* **Data preparation:** Z-score scaling fitted on the training split only and sliding windows of 30 cycles (`[Windows, 30, 66]` tensors), labelled with the class of the last cycle of each window.
 
 ---
 
@@ -68,7 +68,8 @@ A critical aspect of predictive maintenance projects is preventing information l
 To ensure realistic evaluation:
 
 * Entire engine trajectories remain in a single split.
-* Group-based Train/Validation/Test partitioning.
+* Group-based Train/Validation/Test partitioning (70% / 15% / 15% of the engines, `GroupShuffleSplit`).
+* Scaler and invariant-sensor detection are fitted on the training split only.
 * No future information is used during feature generation.
 * RUL values are removed after target construction.
 
@@ -119,6 +120,11 @@ The training pipeline includes:
 * Class Weight Balancing
 * Adam Optimizer
 * CrossEntropy Loss
+* Fixed random seeds for reproducibility
+
+**Model selection:** the best architecture is chosen by **validation Macro F1**; the test split is only used to report final metrics.
+
+**Evaluation data:** all splits are built from the run-to-failure `train_FD00x` trajectories, because the class labels require the full RUL of every cycle. The official `test_FD00x` / `RUL_FD00x` files are included in `data/` for reference.
 
 ---
 
@@ -135,6 +141,55 @@ The project automatically produces:
 *  ROC Curves
 *  Engine Degradation Visualizations
 *  Best Model Identification
+
+---
+
+#  Results
+
+Test-set metrics (107 unseen engines, 20,641 windows). Training on an NVIDIA GeForce GTX 1650.
+
+| Model                 | Val Macro F1 | Test Macro F1 | Test Accuracy | Training Time (s) |
+| --------------------- | :----------: | :-----------: | :-----------: | :---------------: |
+| **PatchTST**          | **0.779**    | 0.792         | **0.841**     | 504               |
+| TimeSeriesTransformer | 0.774        | **0.794**     | 0.834         | 221               |
+| ConvTransformer       | 0.750        | 0.738         | 0.792         | 213               |
+| InceptionTime         | 0.723        | 0.753         | 0.803         | 104               |
+| FCN (Baseline)        | 0.683        | 0.681         | 0.750         | 134               |
+
+**Selected model: PatchTST** (best validation Macro F1). On the test set it reaches ROC AUC of 0.988 (Critical), 0.967 (Healthy) and 0.895 (Alert). The *Alert* class is the hardest one (F1 = 0.61) because it is the transition zone between healthy operation and imminent failure, while *Critical* engines are detected with a recall of 0.83 and are almost never confused with *Healthy* (5 of 3,317 windows).
+
+Both Transformer-based models clearly outperform the convolutional baselines; TimeSeriesTransformer offers a similar Macro F1 at less than half of PatchTST's training time.
+
+---
+
+#  Project Structure
+
+```
+├── data/
+│   ├── train_FD001.txt ... train_FD004.txt   # run-to-failure trajectories (used)
+│   ├── test_FD001.txt  ... test_FD004.txt    # official NASA test set (reference)
+│   ├── RUL_FD001.txt   ... RUL_FD004.txt     # official test RUL (reference)
+│   ├── readme.txt                            # dataset description (NASA)
+│   └── Damage Propagation Modeling.pdf       # reference paper (Saxena et al., 2008)
+├── notebooks/
+│   └── Predictive Maintenance.ipynb          # full pipeline: EDA → FE → 5 models → benchmark
+├── requirements.txt
+├── README.md
+└── README_es.md
+```
+
+---
+
+#  How to Run
+
+```bash
+git clone https://github.com/arguar13/Predictive-Maintenance-for-Turbofan-Eng-Time-Series-Deep-Learning-Classification-.git
+cd Predictive-Maintenance-for-Turbofan-Eng-Time-Series-Deep-Learning-Classification-
+pip install -r requirements.txt
+jupyter notebook "notebooks/Predictive Maintenance.ipynb"
+```
+
+The notebook reads the data from the relative `data/` folder and uses the GPU automatically when available (CPU also works).
 
 ---
 
